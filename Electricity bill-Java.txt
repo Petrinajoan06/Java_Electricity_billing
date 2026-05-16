@@ -1,0 +1,274 @@
+package Bill;
+
+import javax.swing.*;
+import java.awt.*;
+import java.sql.*;
+import java.text.SimpleDateFormat;
+import java.util.Date; 
+
+public class electricity_bill extends JFrame {
+
+    // Input fields
+    private JTextField txtConsumerId, txtConsumerName, txtMeterNo, txtPhone, txtUnits;
+
+    // Output areas
+    private JTextArea billArea, reportArea;
+
+    // Buttons
+    private JButton btnCalculate, btnSave, btnLoadConsumers, btnReport, btnAddConsumer, btnClear;
+
+    public electricity_bill() {
+        setTitle("Electricity Bill Management System");
+        setSize(1100, 800);
+        setLocationRelativeTo(null);
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        setResizable(false);
+
+        initUI();
+        loadAllBills();
+    }
+
+    //DATABASE CONNECTION
+    private Connection getConnection() {
+        try {
+            return DriverManager.getConnection(
+                    "jdbc:mysql://localhost:3306/electricity_bill",
+                    "root",
+                    "Petrina@06"
+            );
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Database connection failed");
+            return null;
+        }
+    }
+
+    // UI DESIGN 
+    private void initUI() {
+        JPanel main = new JPanel(new BorderLayout(10, 10));
+        main.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 15));
+
+        main.add(createInputPanel(), BorderLayout.NORTH);
+        main.add(createButtonPanel(), BorderLayout.CENTER);
+
+        billArea = new JTextArea(25, 50);
+        reportArea = new JTextArea(25, 50);
+
+        JSplitPane splitPane = new JSplitPane(
+                JSplitPane.HORIZONTAL_SPLIT,
+                new JScrollPane(billArea),
+                new JScrollPane(reportArea)
+        );
+        splitPane.setDividerLocation(550);
+
+        billArea.setEditable(false);
+        reportArea.setEditable(false);
+
+        main.add(splitPane, BorderLayout.SOUTH);
+        add(main);
+    }
+
+    private JPanel createInputPanel() {
+        JPanel panel = new JPanel(new GridLayout(3, 4, 10, 10));
+        panel.setBorder(BorderFactory.createTitledBorder("Consumer Details"));
+
+        panel.add(new JLabel("Consumer ID"));
+        txtConsumerId = new JTextField();
+        panel.add(txtConsumerId);
+
+        panel.add(new JLabel("Consumer Name"));
+        txtConsumerName = new JTextField();
+        panel.add(txtConsumerName);
+
+        panel.add(new JLabel("Meter No"));
+        txtMeterNo = new JTextField();
+        panel.add(txtMeterNo);
+
+        panel.add(new JLabel("Phone"));
+        txtPhone = new JTextField();
+        panel.add(txtPhone);
+
+        panel.add(new JLabel("Units Consumed"));
+        txtUnits = new JTextField();
+        panel.add(txtUnits);
+
+        return panel;
+    }
+
+    private JPanel createButtonPanel() {
+        JPanel panel = new JPanel(new FlowLayout());
+
+        btnCalculate = new JButton("Calculate Bill");
+        btnSave = new JButton("Save Bill");
+        btnLoadConsumers = new JButton("Load Consumers");
+        btnReport = new JButton("Monthly Report");
+        btnAddConsumer = new JButton("Add Consumer");
+        btnClear = new JButton("Clear");
+
+        btnCalculate.addActionListener(e -> calculateBill());
+        btnSave.addActionListener(e -> saveBill());
+        btnLoadConsumers.addActionListener(e -> loadConsumers());
+        btnReport.addActionListener(e -> generateReport());
+        btnAddConsumer.addActionListener(e -> addConsumer());
+        btnClear.addActionListener(e -> clearFields());
+
+        panel.add(btnCalculate);
+        panel.add(btnSave);
+        panel.add(btnLoadConsumers);
+        panel.add(btnReport);
+        panel.add(btnAddConsumer);
+        panel.add(btnClear);
+
+        return panel;
+    }
+
+    // BILL CALCULATION 
+    private void calculateBill() {
+        try {
+            int units = Integer.parseInt(txtUnits.getText());
+            double amount = calculateAmount(units);
+
+            String dueDate = new SimpleDateFormat("dd-MM-yyyy")
+                    .format(new Date(System.currentTimeMillis() + 15L * 24 * 60 * 60 * 1000));
+
+            billArea.setText(
+                    "Consumer ID   : " + txtConsumerId.getText() + "\n" +
+                    "Name          : " + txtConsumerName.getText() + "\n" +
+                    "Units         : " + units + "\n" +
+                    "Bill Amount   : ₹" + amount + "\n" +
+                    "Due Date      : " + dueDate
+            );
+
+        } catch (NumberFormatException e) {
+            JOptionPane.showMessageDialog(this, "Enter valid units");
+        }
+    }
+
+    private double calculateAmount(int units) {
+        double amount = 25;
+
+        if (units <= 100)
+            amount += units * 5.15;
+        else if (units <= 200)
+            amount += 100 * 5.15 + (units - 100) * 7.55;
+        else
+            amount += 100 * 5.15 + 100 * 7.55 + (units - 200) * 8.25;
+
+        return Math.round(amount * 100.0) / 100.0;
+    }
+
+    //DATABASE OPERATIONS 
+    private void saveBill() {
+        try (Connection con = getConnection()) {
+            String sql = "INSERT INTO bills (consumer_id, consumer_name, units_consumed, bill_date, bill_amount, due_date) " +
+                    "VALUES (?, ?, ?, CURDATE(), ?, DATE_ADD(CURDATE(), INTERVAL 15 DAY))";
+
+            PreparedStatement ps = con.prepareStatement(sql);
+            ps.setString(1, txtConsumerId.getText());
+            ps.setString(2, txtConsumerName.getText());
+            ps.setInt(3, Integer.parseInt(txtUnits.getText()));
+            ps.setDouble(4, calculateAmount(Integer.parseInt(txtUnits.getText())));
+
+            ps.executeUpdate();
+            JOptionPane.showMessageDialog(this, "Bill saved successfully");
+
+            loadAllBills();
+            clearFields();
+
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, e.getMessage());
+        }
+    }
+
+    private void loadAllBills() {
+        try (Connection con = getConnection();
+             Statement st = con.createStatement();
+             ResultSet rs = st.executeQuery("SELECT * FROM bills ORDER BY bill_date DESC")) {
+
+            StringBuilder sb = new StringBuilder();
+            while (rs.next()) {
+                sb.append(rs.getString("consumer_id"))
+                  .append(" | ₹")
+                  .append(rs.getDouble("bill_amount"))
+                  .append(" | ")
+                  .append(rs.getString("status"))
+                  .append("\n");
+            }
+            billArea.setText(sb.toString());
+
+        } catch (SQLException e) {
+            billArea.setText("No bills found");
+        }
+    }
+
+    private void loadConsumers() {
+        try (Connection con = getConnection();
+             Statement st = con.createStatement();
+             ResultSet rs = st.executeQuery("SELECT * FROM consumers")) {
+
+            StringBuilder sb = new StringBuilder();
+            while (rs.next()) {
+                sb.append(rs.getString("consumer_id"))
+                  .append(" - ")
+                  .append(rs.getString("consumer_name"))
+                  .append("\n");
+            }
+            reportArea.setText(sb.toString());
+
+        } catch (SQLException e) {
+            reportArea.setText("No consumers found");
+        }
+    }
+
+    private void generateReport() {
+        try (Connection con = getConnection();
+             Statement st = con.createStatement();
+             ResultSet rs = st.executeQuery(
+                     "SELECT status, COUNT(*) cnt, SUM(bill_amount) total FROM bills GROUP BY status")) {
+
+            StringBuilder sb = new StringBuilder("STATUS REPORT\n\n");
+            while (rs.next()) {
+                sb.append(rs.getString("status"))
+                  .append(" : ")
+                  .append(rs.getInt("cnt"))
+                  .append(" bills | ₹")
+                  .append(rs.getDouble("total"))
+                  .append("\n");
+            }
+            reportArea.setText(sb.toString());
+
+        } catch (SQLException e) {
+            reportArea.setText("Report not available");
+        }
+    }
+
+    private void addConsumer() {
+        try (Connection con = getConnection()) {
+            String sql = "INSERT INTO consumers VALUES (?, ?, 'N/A', ?, ?)";
+
+            PreparedStatement ps = con.prepareStatement(sql);
+            ps.setString(1, txtConsumerId.getText());
+            ps.setString(2, txtConsumerName.getText());
+            ps.setString(3, txtPhone.getText());
+            ps.setString(4, txtMeterNo.getText());
+
+            ps.executeUpdate();
+            JOptionPane.showMessageDialog(this, "Consumer added");
+
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Consumer already exists");
+        }
+    }
+
+    private void clearFields() {
+        txtConsumerId.setText("");
+        txtConsumerName.setText("");
+        txtMeterNo.setText("");
+        txtPhone.setText("");
+        txtUnits.setText("");
+        billArea.setText("");
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> new electricity_bill().setVisible(true));
+    }
+}
