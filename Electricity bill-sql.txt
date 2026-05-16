@@ -1,0 +1,113 @@
+CREATE DATABASE electricity_bill;
+USE electricity_bill;
+
+-- Main Bills Table
+CREATE TABLE IF NOT EXISTS bills (
+    bill_id INT PRIMARY KEY AUTO_INCREMENT,
+    consumer_id VARCHAR(20) NOT NULL,
+    consumer_name VARCHAR(100) NOT NULL,
+    units_consumed INT NOT NULL,
+    bill_date DATE DEFAULT (CURRENT_DATE()),
+    bill_amount DECIMAL(10,2) NOT NULL,
+    due_date DATE NOT NULL,
+    status ENUM('Pending', 'Paid', 'Overdue') DEFAULT 'Pending'
+);
+
+-- Consumers Table (for customer master data)
+CREATE TABLE IF NOT EXISTS consumers (
+    consumer_id VARCHAR(20) PRIMARY KEY,
+    consumer_name VARCHAR(100) NOT NULL,
+    address VARCHAR(200),
+    phone VARCHAR(15),
+    meter_no VARCHAR(20) UNIQUE,
+    join_date DATE DEFAULT (CURRENT_DATE())
+);
+
+-- Monthly Summary Table (for reports)
+CREATE TABLE IF NOT EXISTS monthly_summary (
+    summary_id INT PRIMARY KEY AUTO_INCREMENT,
+    month_year VARCHAR(7) NOT NULL, -- Format: YYYY-MM
+    total_consumers INT DEFAULT 0,
+    total_units INT DEFAULT 0,
+    total_revenue DECIMAL(12,2) DEFAULT 0.00,
+    created_date DATE DEFAULT (CURRENT_DATE()),
+    UNIQUE KEY unique_month (month_year)
+);
+
+-- Insert Sample Consumers
+INSERT INTO consumers (consumer_id, consumer_name, address, phone, meter_no) VALUES
+('CUST001', 'Ramesh Kumar', '123 Main St, Chennai', '9876543210', 'MTR001'),
+('CUST002', 'Sita Devi', '456 Park Rd, Salem', '9876543211', 'MTR002'),
+('CUST003', 'Arun Singh', '789 MG Rd, Coimbatore', '9876543212', 'MTR003'),
+('CUST004', 'Priya Patel', '321 Anna Nagar, Madurai', '9876543213', 'MTR004'),
+('CUST005', 'Vijay Reddy', '654 Nehru St, Trichy', '9876543214', 'MTR005');
+
+-- Insert Sample Bills (with calculated amounts)
+INSERT INTO bills (consumer_id, consumer_name, units_consumed, bill_amount, due_date, status) VALUES
+('CUST001', 'Ramesh Kumar', 150, 825.00, '2025-01-15', 'Pending'),
+('CUST002', 'Sita Devi', 80, 410.00, '2025-01-15', 'Paid'),
+('CUST003', 'Arun Singh', 250, 1475.00, '2025-01-15', 'Overdue'),
+('CUST004', 'Priya Patel', 120, 660.00, '2025-01-20', 'Pending'),
+('CUST005', 'Vijay Reddy', 300, 1800.00, '2025-01-25', 'Pending');
+
+-- Stored Procedure for Bill Calculation (Indian EB Rates)
+DELIMITER //
+CREATE PROCEDURE CalculateBill(
+    IN p_consumer_id VARCHAR(20),
+    IN p_units INT,
+    IN p_bill_date DATE
+)
+BEGIN
+    DECLARE v_amount DECIMAL(10,2);
+    DECLARE v_due_date DATE;
+    
+    -- Calculate bill amount
+    -- Slab rates: 0-100: Rs5.15, 101-200: Rs7.55, 201+: Rs8.25 + Fixed Rs25
+    SET v_amount = 25.00; -- Fixed charge
+    
+    IF p_units <= 100 THEN
+        SET v_amount = v_amount + (p_units * 5.15);
+    ELSEIF p_units <= 200 THEN
+        SET v_amount = v_amount + (100 * 5.15) + ((p_units - 100) * 7.55);
+    ELSE
+        SET v_amount = v_amount + (100 * 5.15) + (100 * 7.55) + ((p_units - 200) * 8.25);
+    END IF;
+    
+    SET v_due_date = DATE_ADD(p_bill_date, INTERVAL 15 DAY);
+    
+    -- Insert calculated bill
+    INSERT INTO bills (consumer_id, consumer_name, units_consumed, bill_date, bill_amount, due_date)
+    SELECT c.consumer_id, c.consumer_name, p_units, p_bill_date, v_amount, v_due_date
+    FROM consumers c WHERE c.consumer_id = p_consumer_id;
+    
+    SELECT v_amount as 'Bill Amount', v_due_date as 'Due Date';
+END //
+DELIMITER ;
+
+-- Sample Usage of Procedure
+CALL CalculateBill('CUST001', 175, '2025-01-10');
+
+-- Monthly Report Query (Bonus Feature)
+SELECT 
+    month_year,
+    total_consumers,
+    total_units,
+    total_revenue,
+    ROUND((total_revenue/total_consumers), 2) as 'Avg Bill'
+FROM monthly_summary
+ORDER BY month_year DESC;
+
+-- View All Bills
+SELECT 
+    bill_id, consumer_id, consumer_name, units_consumed, 
+    bill_amount, bill_date, due_date, status
+FROM bills 
+ORDER BY bill_date DESC;
+
+-- Quick Status Check
+SELECT 
+    status, COUNT(*) as 'Count', 
+    ROUND(AVG(bill_amount),2) as 'Avg Amount'
+FROM bills 
+GROUP BY status;
+
